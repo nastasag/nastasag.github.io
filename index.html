@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Кто же у вас будет?</title>
+<style>
+  :root {
+    --accent: #ffd166;
+    --accent2: #ff6b9d;
+    --bg: #0b0e1a;
+  }
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 30%, #a1c4fd 70%, #c2e9fb 100%);
+    background-attachment: fixed;
+    color: #2b2d72;
+  }
+
+  #fireworks {
+    position: fixed;
+    inset: 0;
+    display: block;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .stage {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 40px;
+    padding: 24px;
+    text-align: center;
+  }
+
+  h1 {
+    position: fixed;
+    top: 6vh;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;
+    font-size: clamp(1.8rem, 6vw, 3.6rem);
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    margin: 0;
+    color: #2b2d72;
+    text-shadow: 0 0 18px rgba(255, 255, 255, 0.8), 0 2px 0 rgba(255, 255, 255, 0.5);
+  }
+
+  h1 .mark {
+    color: var(--accent);
+  }
+
+  /* Убегающая кнопка — арена на весь экран */
+  .runner-wrap {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .runner {
+    position: absolute;
+    padding: 18px 34px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #1a1030;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 10px 30px rgba(255, 107, 157, 0.45);
+    transition: transform 0.12s ease-out;
+    white-space: nowrap;
+    will-change: transform;
+    pointer-events: auto;
+  }
+
+  .runner:hover { filter: brightness(1.05); }
+
+  .hint {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 5vh;
+    font-size: 0.95rem;
+    opacity: 0.7;
+    white-space: nowrap;
+    z-index: 1;
+    color: #2b2d72;
+    pointer-events: none;
+  }
+
+  /* Результат */
+  .reveal {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    animation: pop 0.6s ease;
+  }
+
+  .reveal.show { display: flex; }
+
+  .reveal .name {
+    font-size: clamp(2.4rem, 9vw, 5rem);
+    font-weight: 900;
+    color: #2b2d72;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.95), 0 0 50px rgba(255, 255, 255, 0.6);
+    animation: glow 1.8s ease-in-out infinite;
+    margin: 0;
+  }
+
+  .reveal .sub {
+    font-size: 1.1rem;
+    opacity: 0.85;
+    color: #3a3d8f;
+    margin: 0;
+  }
+
+  @keyframes pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    70% { transform: scale(1.06); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes glow {
+    0%, 100% { filter: drop-shadow(0 0 12px rgba(255, 209, 102, 0.6)); }
+    50%      { filter: drop-shadow(0 0 30px rgba(255, 107, 157, 0.9)); }
+  }
+</style>
+</head>
+<body>
+  <canvas id="fireworks"></canvas>
+
+  <div class="stage">
+    <h1>кто же <span class="mark">у вас</span> будет?</h1>
+
+    <div class="runner-wrap" id="wrap">
+      <button class="runner" id="runner" type="button">Узнать</button>
+      <div class="hint">(она убегает — попробуй поймать)</div>
+    </div>
+
+    <div class="reveal" id="reveal">
+      <p class="name" id="nameText"></p>
+      <p class="sub">🎆 залп в вашу честь!</p>
+    </div>
+  </div>
+
+<script>
+// ============================================================
+// ТЕКСТ, КОТОРЫЙ ПОКАЖЕТСЯ ПРИ ПОИМКЕ КНОПКИ — отредактируй здесь:
+const REVEAL_TEXT = "Мальчик!!! 🎉";
+// ============================================================
+
+// ---------- Убегающая кнопка ----------
+const runner = document.getElementById("runner");
+const wrap = document.getElementById("wrap");
+const reveal = document.getElementById("reveal");
+const nameText = document.getElementById("nameText");
+
+const FLEE_RADIUS = 140;   // на каком расстоянии кнопка начинает удирать
+const FLEE_MIN_DIST = 220; // куда минимум удирать от курсора
+const TITLE_BAND = 150;    // сверху — заголовок, сюда кнопка не прыгает
+const HINT_BAND = 90;      // снизу — подпись, сюда кнопка не прыгает
+
+// позиционирование
+function placeAt(left, top) {
+  runner.style.left = left + "px";
+  runner.style.top = top + "px";
+}
+
+function placeCentered() {
+  const x = (window.innerWidth - runner.offsetWidth) / 2;
+  const y = (window.innerHeight - runner.offsetHeight) / 2;
+  placeAt(x, y);
+}
+
+function isOutOfBounds(x, y) {
+  const w = runner.offsetWidth;
+  const h = runner.offsetHeight;
+  return x < 8 || y < TITLE_BAND || x + w > window.innerWidth - 8 || y + h > window.innerHeight - HINT_BAND;
+}
+
+let frozenUntil = 0; // момент, до которого кнопка «устала» и не бежит
+
+function flee(e) {
+  const now = performance.now();
+  // кнопка замерла от усталости — это шанс её поймать
+  if (now < frozenUntil) return;
+
+  const cx = e.clientX;
+  const cy = e.clientY;
+  const x = parseFloat(runner.style.left) || window.innerWidth / 2;
+  const y = parseFloat(runner.style.top) || window.innerHeight / 2;
+  const bw = runner.offsetWidth;
+  const bh = runner.offsetHeight;
+  // центр кнопки
+  const bcx = x + bw / 2;
+  const bcy = y + bh / 2;
+
+  // если курсор далеко — кнопка спокойна
+  if (Math.hypot(cx - bcx, cy - bcy) > FLEE_RADIUS) return;
+
+  // иногда кнопка «устаёт» и замирает на долю секунды — можно успеть нажать
+  if (Math.random() < 0.18) {
+    frozenUntil = now + rand(350, 750);
+    return;
+  }
+
+  // иначе — удираем в случайную точку, подальше от курсора
+  let tx, ty, attempts = 0;
+  do {
+    tx = Math.random() * (window.innerWidth - bw);
+    ty = TITLE_BAND + Math.random() * (window.innerHeight - HINT_BAND - TITLE_BAND - bh);
+    const tcx = tx + bw / 2;
+    const tcy = ty + bh / 2;
+    const tooClose = Math.hypot(cx - tcx, cy - tcy) < FLEE_MIN_DIST;
+    const offScreen = isOutOfBounds(tx, ty);
+    if (!tooClose && !offScreen) break;
+    attempts++;
+  } while (attempts < 30);
+
+  placeAt(tx, ty);
+}
+
+// следим за курсором и пальцем по всему экрану
+window.addEventListener("mousemove", flee);
+window.addEventListener("touchmove", flee, { passive: true });
+window.addEventListener("touchstart", flee, { passive: true });
+
+// поймали!
+runner.addEventListener("click", () => {
+  reveal.classList.add("show");
+  nameText.textContent = REVEAL_TEXT;
+  fireCelebration();   // большой залп
+});
+
+placeCentered();
+
+// ---------- Салюты (canvas) ----------
+const canvas = document.getElementById("fireworks");
+const ctx = canvas.getContext("2d");
+let W, H, particles = [];
+const GRAVITY = 0.03;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const PALETTE = [
+  "#ffd166", "#ff6b9d", "#64ffda", "#7c83ff",
+  "#ff8a5c", "#a3ff61", "#ff4d6d", "#ffe066"
+];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function spawnBurst(x, y, color, count) {
+  count = count || 150;
+  const base = color || PALETTE[(Math.random() * PALETTE.length) | 0];
+  const hue = [];
+  for (let i = 0; i < 3; i++) hue.push(PALETTE[(Math.random() * PALETTE.length) | 0]);
+  for (let i = 0; i < count; i++) {
+    const ang = rand(0, Math.PI * 2);
+    const speed = rand(2, 9);
+    particles.push({
+      x, y,
+      vx: Math.cos(ang) * speed,
+      vy: Math.sin(ang) * speed,
+      life: 1,
+      decay: rand(0.006, 0.016),
+      color: base, // hue[(Math.random() * hue.length) | 0],
+      size: rand(2.5, 4.5)
+    });
+  }
+}
+
+function launch() {
+  const x = rand(W * 0.15, W * 0.85);
+  const y = rand(H * 0.15, H * 0.55);
+  // ракета
+  particles.push({
+    x: rand(W * 0.2, W * 0.8), y: H + 20,
+    vx: rand(-0.5, 0.5),
+    vy: rand(-9, -7),
+    life: 1, decay: 0.011,
+    color: "#ffe066", size: 3,
+    rocket: { tx: x, ty: y }
+  });
+}
+
+function step() {
+  ctx.clearRect(0, 0, W, H);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.vy += GRAVITY;
+    p.vx *= 0.985;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+
+    // ракета достигла цели — взрываемся
+    if (p.rocket && p.life <= 0) {
+      spawnBurst(p.rocket.tx, p.rocket.ty, p.color, 90);
+      particles.splice(i, 1);
+      continue;
+    }
+    if (p.life <= 0 || p.y > H + 20) { particles.splice(i, 1); continue; }
+
+    ctx.globalAlpha = Math.max(p.life, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    // яркий ореол
+    ctx.globalAlpha = Math.max(p.life, 0) * 0.25;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(step);
+}
+
+function fireCelebration() {
+  // большой залп из нескольких ракет
+  for (let i = 0; i < 70; i++) {
+    setTimeout(launch, i * 45);
+  }
+}
+
+// фоновый частый салют
+setInterval(() => { if (Math.random() < 0.95) launch(); }, 700);
+
+step();
+</script>
+</body>
+</html>
